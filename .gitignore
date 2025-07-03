@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite database
+bandirma.db
+
+# Environment variables
+.env
+.env.*
+
+# VS Code
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Pytest cache
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# Backup files
+*~
+*.bak
+*.swp
+*.swo
+
+# Uploads
+uploads/
