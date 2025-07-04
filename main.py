@@ -994,3 +994,75 @@ async def read_users_me(current_user: dict = Depends(get_current_user)):
         "username": current_user["kullanici_adi"],
         "role": current_user["rol"]
     }
+
+@app.post("/api/siniflar/yukle")
+async def siniflar_excel_yukle(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["rol"] != "admin":
+        raise HTTPException(status_code=403, detail="Yetkisiz erişim")
+    # Dosyayı geçici olarak kaydet
+    with NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    imported = 0
+    errors = []
+    try:
+        wb = openpyxl.load_workbook(tmp_path)
+        ws = wb.active
+        headers = [str(cell.value).strip() for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+        # Sadece bu sütunlar kullanılacak
+        valid_headers = ["sinif_isim", "kursiyer_sayi", "kursiyer_list"]
+        header_idx = {h: i for i, h in enumerate(headers) if h in valid_headers}
+        if not header_idx:
+            raise Exception("Excel başlıkları uygun değil. Gerekli: sinif_isim, kursiyer_sayi, kursiyer_list")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        for idx, row in enumerate(ws.iter_rows(min_row=2), start=2):
+            try:
+                row_data = {}
+                for h in valid_headers:
+                    if h in header_idx:
+                        val = row[header_idx[h]].value
+                        row_data[h] = val if val is not None else ""
+                    else:
+                        row_data[h] = ""
+                # En az sinif_isim dolu olmalı
+                if not row_data["sinif_isim"] or str(row_data["sinif_isim"]).strip() == "":
+                    continue
+                # kursiyer_sayi int olarak kaydedilecek
+                kursiyer_sayi_val = row_data.get("kursiyer_sayi", 0)
+                try:
+                    kursiyer_sayi_val = int(kursiyer_sayi_val)
+                except Exception:
+                    kursiyer_sayi_val = 0
+                # kursiyer_list string olarak kaydedilecek
+                kursiyer_list_val = row_data.get("kursiyer_list", "")
+                if isinstance(kursiyer_list_val, list):
+                    kursiyer_list_val = str(kursiyer_list_val)
+                else:
+                    kursiyer_list_val = str(kursiyer_list_val or "")
+                # Ekle
+                cursor.execute(
+                    "INSERT INTO sinif (sinif_isim, kursiyer_sayi, kursiyer_list) VALUES (?, ?, ?)",
+                    (
+                        str(row_data.get("sinif_isim", "")),
+                        kursiyer_sayi_val,
+                        kursiyer_list_val
+                    )
+                )
+                imported += 1
+            except Exception as e:
+                errors.append(f"{idx}. satır: {str(e)}")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        errors.append(f"Dosya okunamadı veya işlenemedi: {str(e)}")
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+    return {"imported": imported, "errors": errors}
